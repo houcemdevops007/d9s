@@ -6,6 +6,7 @@ import (
 
 	"github.com/houcemdevops007/d9s/internal/domain"
 	"github.com/houcemdevops007/d9s/internal/store"
+	"github.com/houcemdevops007/d9s/pkg/version"
 )
 
 // Panel represents a named display panel.
@@ -178,7 +179,16 @@ func (v *View) renderHeader(b *strings.Builder) {
 	b.WriteString(MoveTo(1, 1))
 	b.WriteString(t.BgHeader)
 	b.WriteString(t.TextHeader)
-	header := Pad(" ⬡ d9s  Docker TUI", v.width)
+	headerText := " ⬡ d9s  Docker TUI"
+	authorText := "by " + version.Author
+	
+	// If width permits, show author in header
+	fullHeader := headerText
+	if v.width > len(headerText)+len(authorText)+20 {
+		fullHeader = fmt.Sprintf("%-20s %s", headerText, authorText)
+	}
+	
+	header := Pad(fullHeader, v.width)
 	b.WriteString(header)
 	b.WriteString(Reset)
 
@@ -544,6 +554,8 @@ func (v *View) renderHelp(b *strings.Builder) {
 		"  ║  ?            Toggle this help        ║",
 		"  ║  q  /  Ctrl+C Quit                   ║",
 		"  ╚══════════════════════════════════════╝",
+		"",
+		"  " + version.Author,
 		"",
 	}
 	startRow := centerRow - len(helpLines)/2

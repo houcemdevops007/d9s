@@ -5,4 +5,5 @@ var (
 	Version   = "0.1.0-dev"
 	GitCommit = "unknown"
 	BuildDate = "unknown"
+	Author    = "KHLIFI HOUCEM / INGENIEUR DEVSECOPS && CLOUD"
 )

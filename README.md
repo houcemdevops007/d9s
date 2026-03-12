@@ -163,4 +163,4 @@ Run `make package` to generate compressed archives for all platforms in the `bui
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+MIT — Copyright (c) 2024-2026 KHLIFI HOUCEM / INGENIEUR DEVSECOPS && CLOUD
