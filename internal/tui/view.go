@@ -1,3 +1,4 @@
+// KHLIFI HOUCEM / INGENIEUR DEVSECOPS && CLOUD
 package tui
 
 import (
@@ -16,6 +17,9 @@ const (
 	PanelContainers Panel = iota
 	PanelProjects
 	PanelContexts
+	PanelImages
+	PanelVolumes
+	PanelNetworks
 )
 
 // DetailTab represents the active detail tab.
@@ -26,6 +30,9 @@ const (
 	TabEvents
 	TabStats
 	TabInspect
+	TabTrivy
+	TabSnyk
+	TabRecommendations
 )
 
 // View holds the full UI rendering state.
@@ -42,10 +49,21 @@ type View struct {
 	projectIdx     int
 	contexts       []domain.DockerContext
 	contextIdx     int
+	images         []domain.Image
+	imageIdx       int
+	volumes        []domain.Volume
+	volumeIdx      int
+	networks       []domain.Network
+	networkIdx     int
 	logs           []string
 	events         []domain.RuntimeEvent
 	stats          map[string]domain.RuntimeStats
+	security       map[string]map[string]domain.SecurityScanResult
+	recommendations map[string][]domain.BestPracticeRecommendation
+	scanInProgress map[string]bool
+	scanErrors     map[string]string
 	inspect        string
+	detailScroll   int
 	searching      bool
 	searchBuf      string
 	statusMsg      string
@@ -70,8 +88,16 @@ func (v *View) UpdateFromStore(st store.State) {
 	v.containers = st.Containers
 	v.projects = st.Projects
 	v.contexts = st.Contexts
+	v.images = st.Images
+	v.volumes = st.Volumes
+	v.networks = st.Networks
 	v.events = st.Events
 	v.stats = st.Stats
+	v.security = st.SecurityResults
+	v.recommendations = st.Recommendations
+	v.scanInProgress = st.ScanInProgress
+	v.scanErrors = st.ScanningErrors
+
 	if v.containerIdx >= len(v.containers) && len(v.containers) > 0 {
 		v.containerIdx = len(v.containers) - 1
 	}
@@ -81,13 +107,78 @@ func (v *View) UpdateFromStore(st store.State) {
 	if v.contextIdx >= len(v.contexts) && len(v.contexts) > 0 {
 		v.contextIdx = len(v.contexts) - 1
 	}
+	if v.imageIdx >= len(v.images) && len(v.images) > 0 {
+		v.imageIdx = len(v.images) - 1
+	}
+	if v.volumeIdx >= len(v.volumes) && len(v.volumes) > 0 {
+		v.volumeIdx = len(v.volumes) - 1
+	}
+	if v.networkIdx >= len(v.networks) && len(v.networks) > 0 {
+		v.networkIdx = len(v.networks) - 1
+	}
 }
 
 // SetInspect sets the inspect panel content.
-func (v *View) SetInspect(s string) { v.inspect = s }
+func (v *View) SetInspect(s string) {
+	v.inspect = s
+	v.detailScroll = 0
+}
+
+func (v *View) ScrollDetail(delta int) {
+	totalLines := 0
+	switch v.activeTab {
+	case TabLogs:
+		totalLines = len(v.logs)
+	case TabEvents:
+		totalLines = len(v.events)
+	case TabStats:
+		totalLines = len(v.stats) + 1
+	case TabInspect:
+		totalLines = len(strings.Split(v.inspect, "\n"))
+	case TabTrivy, TabSnyk:
+		if img := v.ActiveImage(); img != nil {
+			scanner := "Trivy"
+			if v.activeTab == TabSnyk {
+				scanner = "Snyk"
+			}
+			if res, ok := v.security[img.ID][scanner]; ok {
+				totalLines = 4 + len(res.Vulnerabilities) + len(res.Misconfigs) + 2
+			}
+		}
+	case TabRecommendations:
+		if img := v.ActiveImage(); img != nil {
+			if recs, ok := v.recommendations[img.ID]; ok {
+				totalLines = len(recs) * 2
+			}
+		}
+	}
+
+	maxScroll := totalLines - (v.height - 8)
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	v.detailScroll += delta
+	if v.detailScroll < 0 {
+		v.detailScroll = 0
+	}
+	if v.detailScroll > maxScroll {
+		v.detailScroll = maxScroll
+	}
+}
+
+// ResetScroll resets the detail scroll offset.
+func (v *View) ResetScroll() {
+	v.detailScroll = 0
+}
 
 // SetLogs sets the log lines.
 func (v *View) SetLogs(lines []string) { v.logs = lines }
+
+// SetActivePanel changes the current focus panel.
+func (v *View) SetActivePanel(p Panel) { v.activePanel = p }
+
+// ActivePanel returns the currently active panel.
+func (v *View) ActivePanel() Panel { return v.activePanel }
 
 // ActiveContainer returns the currently selected container or nil.
 func (v *View) ActiveContainer() *domain.Container {
@@ -109,6 +200,39 @@ func (v *View) ActiveProject() *domain.ComposeProject {
 	}
 	p := v.projects[v.projectIdx]
 	return &p
+}
+
+// ActiveImage returns the currently selected image or nil.
+func (v *View) ActiveImage() *domain.Image {
+	if len(v.images) == 0 {
+		return nil
+	}
+	if v.imageIdx >= len(v.images) {
+		v.imageIdx = len(v.images) - 1
+	}
+	return &v.images[v.imageIdx]
+}
+
+// ActiveVolume returns the currently selected volume or nil.
+func (v *View) ActiveVolume() *domain.Volume {
+	if len(v.volumes) == 0 {
+		return nil
+	}
+	if v.volumeIdx >= len(v.volumes) {
+		v.volumeIdx = len(v.volumes) - 1
+	}
+	return &v.volumes[v.volumeIdx]
+}
+
+// ActiveNetwork returns the currently selected network or nil.
+func (v *View) ActiveNetwork() *domain.Network {
+	if len(v.networks) == 0 {
+		return nil
+	}
+	if v.networkIdx >= len(v.networks) {
+		v.networkIdx = len(v.networks) - 1
+	}
+	return &v.networks[v.networkIdx]
 }
 
 // ActiveContext returns the currently selected context or nil.
@@ -161,7 +285,18 @@ func (v *View) Render() string {
 	detailW := rightW - centerW
 
 	v.renderLeftPanel(&b, leftW, contentHeight)
-	v.renderCenterPanel(&b, leftW+2, centerW, contentHeight)
+	
+	switch v.activePanel {
+	case PanelContainers, PanelContexts, PanelProjects:
+		v.renderCenterPanel(&b, leftW+2, centerW, contentHeight)
+	case PanelImages:
+		v.renderImages(&b, leftW+2, centerW, contentHeight)
+	case PanelVolumes:
+		v.renderVolumes(&b, leftW+2, centerW, contentHeight)
+	case PanelNetworks:
+		v.renderNetworks(&b, leftW+2, centerW, contentHeight)
+	}
+	
 	v.renderDetailPanel(&b, leftW+2+centerW+1, detailW, contentHeight)
 	v.renderColumnSeparators(&b, leftW, centerW, contentHeight)
 
@@ -182,11 +317,8 @@ func (v *View) renderHeader(b *strings.Builder) {
 	headerText := " ⬡ d9s  Docker TUI"
 	authorText := "by " + version.Author
 	
-	// If width permits, show author in header
-	fullHeader := headerText
-	if v.width > len(headerText)+len(authorText)+20 {
-		fullHeader = fmt.Sprintf("%-20s %s", headerText, authorText)
-	}
+	// Show author in header - adjust padding based on width
+	fullHeader := fmt.Sprintf("%-20s %s", headerText, authorText)
 	
 	header := Pad(fullHeader, v.width)
 	b.WriteString(header)
@@ -336,6 +468,9 @@ func (v *View) renderDetailPanel(b *strings.Builder, startCol, width, height int
 		{TabEvents, "Events"},
 		{TabStats, "Stats"},
 		{TabInspect, "Inspect"},
+		{TabTrivy, "Trivy Scan"},
+		{TabSnyk, "Snyk Scan"},
+		{TabRecommendations, "Best Practices"},
 	}
 
 	b.WriteString(MoveTo(3, startCol))
@@ -363,6 +498,12 @@ func (v *View) renderDetailPanel(b *strings.Builder, startCol, width, height int
 		v.renderStatsDetail(b, startCol, width, contentStart, contentRows)
 	case TabInspect:
 		v.renderInspectDetail(b, startCol, width, contentStart, contentRows)
+	case TabTrivy:
+		v.renderTrivyDetail(b, startCol, width, contentStart, contentRows)
+	case TabSnyk:
+		v.renderSnykDetail(b, startCol, width, contentStart, contentRows)
+	case TabRecommendations:
+		v.renderRecommendationsDetail(b, startCol, width, contentStart, contentRows)
 	}
 }
 
@@ -370,35 +511,61 @@ func (v *View) renderLogsDetail(b *strings.Builder, col, width, startRow, rows i
 	t := v.theme
 	if len(v.logs) == 0 {
 		b.WriteString(MoveTo(startRow, col))
-		b.WriteString(t.Muted + " No logs. Select container, press 'l'." + Reset)
+		b.WriteString(t.Muted + " No logs. Select container, press 'l'." + Reset + ClearLine())
+		v.clearRemainingRows(b, col, startRow+1, startRow+rows)
 		return
 	}
 	lines := v.logs
-	if len(lines) > rows {
-		lines = lines[len(lines)-rows:]
+	totalLines := len(lines)
+	
+	startIdx := v.detailScroll
+	if startIdx > totalLines {
+		startIdx = totalLines
 	}
-	for i, line := range lines {
+	
+	visibleLines := lines[startIdx:]
+
+	for i, line := range visibleLines {
+		if i >= rows {
+			break
+		}
 		b.WriteString(MoveTo(startRow+i, col))
 		runes := []rune(line)
-		if len(runes) > width-1 {
-			runes = runes[:width-1]
+		if len(runes) > width-3 {
+			runes = runes[:width-3]
 		}
 		b.WriteString(" " + string(runes) + ClearLine())
 	}
+	
+	if len(visibleLines) < rows {
+		v.clearRemainingRows(b, col, startRow+len(visibleLines), startRow+rows)
+	}
+
+	v.renderScrollbar(b, totalLines, startRow, rows, col, width)
 }
 
 func (v *View) renderEventsDetail(b *strings.Builder, col, width, startRow, rows int) {
 	t := v.theme
 	if len(v.events) == 0 {
 		b.WriteString(MoveTo(startRow, col))
-		b.WriteString(t.Muted + " Waiting for events..." + Reset)
+		b.WriteString(t.Muted + " Waiting for events..." + Reset + ClearLine())
+		v.clearRemainingRows(b, col, startRow+1, startRow+rows)
 		return
 	}
 	events := v.events
-	if len(events) > rows {
-		events = events[len(events)-rows:]
+	totalLines := len(events)
+	
+	startIdx := v.detailScroll
+	if startIdx > totalLines {
+		startIdx = totalLines
 	}
-	for i, ev := range events {
+	
+	visibleEvents := events[startIdx:]
+
+	for i, ev := range visibleEvents {
+		if i >= rows {
+			break
+		}
 		b.WriteString(MoveTo(startRow+i, col))
 		timeStr := ev.Time.Format("15:04:05")
 		var typeColor string
@@ -423,59 +590,127 @@ func (v *View) renderEventsDetail(b *strings.Builder, col, width, startRow, rows
 			Pad(ev.Actor, actorW),
 		)
 		runes := []rune(line)
-		if len(runes) > width-1 {
-			line = string(runes[:width-1])
+		if len(runes) > width-3 {
+			line = string(runes[:width-3])
 		}
 		b.WriteString(line + ClearLine())
 	}
+	
+	if len(visibleEvents) < rows {
+		v.clearRemainingRows(b, col, startRow+len(visibleEvents), startRow+rows)
+	}
+
+	v.renderScrollbar(b, totalLines, startRow, rows, col, width)
 }
 
 func (v *View) renderStatsDetail(b *strings.Builder, col, width, startRow, rows int) {
 	t := v.theme
 	if len(v.stats) == 0 {
 		b.WriteString(MoveTo(startRow, col))
-		b.WriteString(t.Muted + " No stats. Select a container and press 's'." + Reset)
+		b.WriteString(t.Muted + " No stats. Select a container and press 's'." + Reset + ClearLine())
+		v.clearRemainingRows(b, col, startRow+1, startRow+rows)
 		return
 	}
-	b.WriteString(MoveTo(startRow, col))
-	b.WriteString(t.Muted + fmt.Sprintf(" %-20s %8s %12s %8s %6s", "NAME", "CPU%", "MEM", "MEM%", "PIDS") + Reset)
-	row := startRow + 1
+	var lines []string
+	lines = append(lines, t.Muted + fmt.Sprintf(" %-20s %8s %12s %8s %6s", "NAME", "CPU%", "MEM", "MEM%", "PIDS") + Reset + ClearLine())
 	for _, s := range v.stats {
-		if row >= startRow+rows {
-			break
-		}
-		b.WriteString(MoveTo(row, col))
 		cpuColor := ColorizePercent(t, s.CPUPercent)
 		memColor := ColorizePercent(t, s.MemPercent)
-		b.WriteString(fmt.Sprintf(" %-20s %s%7.1f%%%s %s%12s%s %s%7.1f%%%s %6d",
+		lines = append(lines, fmt.Sprintf(" %-20s %s%7.1f%%%s %s%12s%s %s%7.1f%%%s %6d",
 			Pad(s.Name, 20),
 			cpuColor, s.CPUPercent, Reset,
 			memColor, FormatBytes(s.MemUsage)+"/"+FormatBytes(s.MemLimit), Reset,
 			memColor, s.MemPercent, Reset,
 			s.PidsCount,
-		) + ClearLine())
-		row++
+		)+ClearLine())
 	}
+	
+	totalLines := len(lines)
+	startIdx := v.detailScroll
+	if startIdx > totalLines {
+		startIdx = totalLines
+	}
+	
+	visibleLines := lines[startIdx:]
+
+	for i, line := range visibleLines {
+		if i >= rows {
+			break
+		}
+		b.WriteString(MoveTo(startRow+i, col))
+		b.WriteString(line)
+	}
+	
+	if len(visibleLines) < rows {
+		v.clearRemainingRows(b, col, startRow+len(visibleLines), startRow+rows)
+	}
+
+	v.renderScrollbar(b, totalLines, startRow, rows, col, width)
 }
 
 func (v *View) renderInspectDetail(b *strings.Builder, col, width, startRow, rows int) {
 	t := v.theme
 	if v.inspect == "" {
 		b.WriteString(MoveTo(startRow, col))
-		b.WriteString(t.Muted + " Select a container, press 'i' to inspect." + Reset)
+		b.WriteString(t.Muted + " Select a container, press 'i' to inspect." + Reset + ClearLine())
+		v.clearRemainingRows(b, col, startRow+1, startRow+rows)
 		return
 	}
 	lines := strings.Split(v.inspect, "\n")
-	for i, line := range lines {
+	totalLines := len(lines)
+	
+	startIdx := v.detailScroll
+	if startIdx > totalLines {
+		startIdx = totalLines
+	}
+	
+	visibleLines := lines[startIdx:]
+
+	for i, line := range visibleLines {
 		if i >= rows {
 			break
 		}
 		b.WriteString(MoveTo(startRow+i, col))
 		runes := []rune(line)
-		if len(runes) > width-2 {
-			runes = runes[:width-2]
+		if len(runes) > width-3 {
+			runes = runes[:width-3]
 		}
 		b.WriteString(" " + string(runes) + ClearLine())
+	}
+	
+	if len(visibleLines) < rows {
+		v.clearRemainingRows(b, col, startRow+len(visibleLines), startRow+rows)
+	}
+
+	v.renderScrollbar(b, totalLines, startRow, rows, col, width)
+}
+
+func (v *View) renderScrollbar(b *strings.Builder, totalLines, startRow, rows, col, width int) {
+	if totalLines > rows {
+		trackChar := "│"
+		thumbChar := "█"
+		
+		scrollPercent := float64(v.detailScroll) / float64(totalLines-rows)
+		if totalLines-rows <= 0 {
+			scrollPercent = 0
+		}
+		
+		thumbHeight := int(float64(rows) * (float64(rows) / float64(totalLines)))
+		if thumbHeight < 1 {
+			thumbHeight = 1
+		}
+		
+		trackHeight := rows
+		thumbPos := int(scrollPercent * float64(trackHeight-thumbHeight))
+		
+		for i := 0; i < trackHeight; i++ {
+			b.WriteString(MoveTo(startRow+i, col+width-1))
+			if i >= thumbPos && i < thumbPos+thumbHeight {
+				b.WriteString(v.theme.Primary + thumbChar + Reset)
+			} else {
+				b.WriteString(v.theme.Muted + trackChar + Reset)
+			}
+		}
 	}
 }
 
@@ -512,8 +747,8 @@ func (v *View) renderStatusBar(b *strings.Builder) {
 	}
 
 	shortcuts := [][]string{
-		{"Tab", "panel"}, {"↑↓", "nav"},
-		{"l", "logs"}, {"e", "events"}, {"s", "stats"}, {"i", "inspect"},
+		{"Tab", "panel"}, {"c", "conts"}, {"g", "imgs"}, {"v", "vols"}, {"n", "nets"},
+		{"l", "logs"}, {"e", "events"}, {"s", "stats/scan"}, {"i", "inspect"},
 		{"r", "restart"}, {"x", "stop"}, {"u", "up"}, {"d", "down"},
 		{"/", "search"}, {"?", "help"}, {"q", "quit"},
 	}
@@ -537,6 +772,7 @@ func (v *View) renderHelp(b *strings.Builder) {
 		"  ╠══════════════════════════════════════╣",
 		"  ║  Tab          Switch panel            ║",
 		"  ║  ↑ / ↓        Navigate list           ║",
+		"  ║  ← / →        Switch Details Tab      ║",
 		"  ║  Enter        Select / Open detail    ║",
 		"  ║  /            Search containers       ║",
 		"  ║  l            View Logs               ║",
@@ -546,7 +782,15 @@ func (v *View) renderHelp(b *strings.Builder) {
 		"  ║  S (shift+s)  Open shell (exec)       ║",
 		"  ║  r            Restart container       ║",
 		"  ║  x            Stop container          ║",
-		"  ║  R / Delete   Remove container        ║",
+		"  ║  R / Delete   Remove resource         ║",
+		"  ║                                       ║",
+		"  ║  Views:                               ║",
+		"  ║  c            Containers (default)    ║",
+		"  ║  g            Images                  ║",
+		"  ║  v            Volumes                 ║",
+		"  ║  n            Networks                ║",
+		"  ║                                       ║",
+		"  ║  Compose:                             ║",
 		"  ║  u            Compose up              ║",
 		"  ║  d            Compose down            ║",
 		"  ║  p            Compose pull            ║",
@@ -603,6 +847,18 @@ func (v *View) MoveDown() {
 		if v.contextIdx < len(v.contexts)-1 {
 			v.contextIdx++
 		}
+	case PanelImages:
+		if v.imageIdx < len(v.images)-1 {
+			v.imageIdx++
+		}
+	case PanelVolumes:
+		if v.volumeIdx < len(v.volumes)-1 {
+			v.volumeIdx++
+		}
+	case PanelNetworks:
+		if v.networkIdx < len(v.networks)-1 {
+			v.networkIdx++
+		}
 	}
 }
 
@@ -620,6 +876,18 @@ func (v *View) MoveUp() {
 		if v.contextIdx > 0 {
 			v.contextIdx--
 		}
+	case PanelImages:
+		if v.imageIdx > 0 {
+			v.imageIdx--
+		}
+	case PanelVolumes:
+		if v.volumeIdx > 0 {
+			v.volumeIdx--
+		}
+	case PanelNetworks:
+		if v.networkIdx > 0 {
+			v.networkIdx--
+		}
 	}
 }
 
@@ -634,7 +902,10 @@ func (v *View) TabNext() {
 	}
 }
 
-func (v *View) SetActiveTab(tab DetailTab) { v.activeTab = tab }
+func (v *View) SetActiveTab(tab DetailTab) {
+	v.activeTab = tab
+	v.ResetScroll()
+}
 
 func (v *View) StartSearch() {
 	v.searching = true
@@ -666,3 +937,20 @@ func (v *View) HideConfirm()        { v.confirmActive = false }
 func (v *View) ConfirmActive() bool { return v.confirmActive }
 func (v *View) IsSearching() bool   { return v.searching }
 func (v *View) Resize(w, h int)     { v.width = w; v.height = h }
+func (v *View) ActiveTab() DetailTab { return v.activeTab }
+
+func (v *View) NextTab() {
+	if v.activeTab < TabRecommendations {
+		v.activeTab++
+	} else {
+		v.activeTab = TabLogs
+	}
+}
+
+func (v *View) PrevTab() {
+	if v.activeTab > TabLogs {
+		v.activeTab--
+	} else {
+		v.activeTab = TabRecommendations
+	}
+}

@@ -1,3 +1,4 @@
+// KHLIFI HOUCEM / INGENIEUR DEVSECOPS && CLOUD
 // Package app wires together all components and runs the main event loop.
 package app
 
@@ -12,6 +13,8 @@ import (
 	"github.com/houcemdevops007/d9s/internal/compose"
 	"github.com/houcemdevops007/d9s/internal/config"
 	"github.com/houcemdevops007/d9s/internal/dockerapi"
+	"github.com/houcemdevops007/d9s/internal/domain"
+	"github.com/houcemdevops007/d9s/internal/scanners"
 	"github.com/houcemdevops007/d9s/internal/store"
 	"github.com/houcemdevops007/d9s/internal/tui"
 )
@@ -24,13 +27,17 @@ type App struct {
 	actions *actions.Runner
 	store   *store.Store
 	term    *tui.Terminal
-	view    *tui.View
+	view     *tui.View
+	trivy    *scanners.TrivyScanner
+	snyk     *scanners.SnykScanner
+	bestRecs *scanners.BestPracticesEngine
+	dockerHost string
 }
 
 // New creates a new App.
-func New(cfg *config.Config) *App {
-	docker := dockerapi.New("")
-	comp := compose.New(cfg.DefaultContext)
+func New(cfg *config.Config, dockerHost string) *App {
+	docker := dockerapi.New(dockerHost)
+	comp := compose.New(cfg.DefaultContext, dockerHost)
 	act := actions.New(docker, comp)
 	st := store.New()
 
@@ -40,7 +47,11 @@ func New(cfg *config.Config) *App {
 		compose: comp,
 		actions: act,
 		store:   st,
-		term:    tui.NewTerminal(),
+		term:     tui.NewTerminal(),
+		trivy:    scanners.NewTrivyScanner(dockerHost),
+		snyk:     scanners.NewSnykScanner(dockerHost),
+		bestRecs: scanners.NewBestPracticesEngine(),
+		dockerHost: dockerHost,
 	}
 }
 
@@ -135,10 +146,17 @@ func (a *App) handleKey(ctx context.Context, k tui.Key) bool {
 	}
 
 	switch {
+	case k.IsKey && k.Code == tui.KeyEsc:
+		a.view.SetActivePanel(tui.PanelContainers)
+		a.view.SetActiveTab(tui.TabLogs)
 	case k.IsKey && k.Code == tui.KeyUp:
 		a.view.MoveUp()
 	case k.IsKey && k.Code == tui.KeyDown:
 		a.view.MoveDown()
+	case k.IsKey && k.Code == tui.KeyLeft:
+		a.view.PrevTab()
+	case k.IsKey && k.Code == tui.KeyRight:
+		a.view.NextTab()
 	case k.IsKey && k.Code == tui.KeyTab:
 		a.view.TabNext()
 	case k.Rune == 'q' || (k.IsKey && (k.Code == tui.KeyCtrlC || k.Code == tui.KeyCtrlD)):
@@ -147,6 +165,10 @@ func (a *App) handleKey(ctx context.Context, k tui.Key) bool {
 		a.view.StartSearch()
 	case k.Rune == '?':
 		a.view.ToggleHelp()
+	case k.Rune == 'k':
+		a.view.ScrollDetail(-3)
+	case k.Rune == 'j':
+		a.view.ScrollDetail(3)
 	case k.IsKey && k.Code == tui.KeyCtrlL:
 		go a.loadInitialData(ctx)
 	case k.Rune == 'l':
@@ -154,12 +176,29 @@ func (a *App) handleKey(ctx context.Context, k tui.Key) bool {
 		go a.loadLogs(ctx)
 	case k.Rune == 'e':
 		a.view.SetActiveTab(tui.TabEvents)
-	case k.Rune == 's':
+	case k.Rune == 's' && a.view.ActivePanel() != tui.PanelImages:
 		a.view.SetActiveTab(tui.TabStats)
 		go a.pollStats(ctx)
 	case k.Rune == 'i':
 		a.view.SetActiveTab(tui.TabInspect)
 		go a.loadInspect(ctx)
+	case k.IsKey && k.Code == tui.KeyEnter:
+		pan := a.view.ActivePanel()
+		tab := a.view.ActiveTab()
+		if pan == tui.PanelContainers {
+			a.view.SetActiveTab(tui.TabLogs)
+			go a.loadLogs(ctx)
+		} else if pan == tui.PanelVolumes || pan == tui.PanelNetworks {
+			a.view.SetActiveTab(tui.TabInspect)
+			go a.loadInspect(ctx)
+		} else if pan == tui.PanelImages {
+			if tab == tui.TabTrivy || tab == tui.TabSnyk || tab == tui.TabRecommendations {
+				// do nothing
+			} else {
+				a.view.SetActiveTab(tui.TabInspect)
+				go a.loadInspect(ctx)
+			}
+		}
 	case k.Rune == 'r':
 		go a.containerAction(ctx, "restart")
 	case k.Rune == 'x':
@@ -177,14 +216,39 @@ func (a *App) handleKey(ctx context.Context, k tui.Key) bool {
 	case k.Rune == 'b':
 		go a.composeAction(ctx, "build")
 	case k.Rune == 'c':
-		a.view.TabNext()
+		a.view.SetActivePanel(tui.PanelContainers)
+	case k.Rune == 'g' || k.Rune == 'i':
+		a.view.SetActivePanel(tui.PanelImages)
+	case k.Rune == 'v':
+		a.view.SetActivePanel(tui.PanelVolumes)
+	case k.Rune == 'n':
+		a.view.SetActivePanel(tui.PanelNetworks)
+	case k.Rune == 's' && a.view.ActivePanel() == tui.PanelImages:
+		a.view.SetActiveTab(tui.TabTrivy)
+		go a.scanImage(ctx)
 	}
 	return false
 }
 
 func (a *App) loadInitialData(ctx context.Context) {
 	ctxs, err := compose.ListContexts()
-	if err == nil {
+	
+	// If connecting remotely via TCP or non-default socket, prepend it as the active context
+	if a.dockerHost != "" {
+		remoteCtx := domain.DockerContext{
+			Name:        a.dockerHost,
+			Description: "Remote Host (DOCKER_HOST)",
+			Endpoint:    a.dockerHost,
+			Current:     true,
+		}
+		// Unmark others
+		for i := range ctxs {
+			ctxs[i].Current = false
+		}
+		ctxs = append([]domain.DockerContext{remoteCtx}, ctxs...)
+	}
+
+	if err == nil || len(ctxs) > 0 {
 		a.store.SetContexts(ctxs)
 		for _, c := range ctxs {
 			if c.Current {
@@ -210,6 +274,11 @@ func (a *App) loadInitialData(ctx context.Context) {
 			}
 		}
 		a.store.SetProjects(projects)
+	}
+
+	images, err := a.docker.ListImages(ctx)
+	if err == nil {
+		a.store.SetImages(images)
 	}
 
 	vols, err := a.docker.ListVolumes(ctx)
@@ -321,12 +390,43 @@ done:
 }
 
 func (a *App) loadInspect(ctx context.Context) {
-	c := a.view.ActiveContainer()
-	if c == nil {
-		a.view.SetStatus("No container selected", true)
+	var data interface{}
+	var err error
+
+	switch a.view.ActivePanel() {
+	case tui.PanelContainers:
+		c := a.view.ActiveContainer()
+		if c == nil {
+			a.view.SetStatus("No container selected", true)
+			return
+		}
+		data, err = a.docker.InspectContainer(ctx, c.ID)
+	case tui.PanelImages:
+		img := a.view.ActiveImage()
+		if img == nil {
+			a.view.SetStatus("No image selected", true)
+			return
+		}
+		data, err = a.docker.InspectImage(ctx, img.ID)
+	case tui.PanelVolumes:
+		vol := a.view.ActiveVolume()
+		if vol == nil {
+			a.view.SetStatus("No volume selected", true)
+			return
+		}
+		data, err = a.docker.InspectVolume(ctx, vol.Name)
+	case tui.PanelNetworks:
+		net := a.view.ActiveNetwork()
+		if net == nil {
+			a.view.SetStatus("No network selected", true)
+			return
+		}
+		data, err = a.docker.InspectNetwork(ctx, net.ID)
+	default:
+		a.view.SetStatus("Nothing to inspect in this panel", true)
 		return
 	}
-	data, err := a.docker.InspectContainer(ctx, c.ID)
+
 	if err != nil {
 		a.view.SetStatus("Inspect error: "+err.Error(), true)
 		return
@@ -428,5 +528,44 @@ func (a *App) execShell() {
 	if err != nil {
 		a.view.SetStatus("Shell error: "+err.Error(), true)
 	}
+	a.render()
+}
+
+func (a *App) scanImage(ctx context.Context) {
+	img := a.view.ActiveImage()
+	if img == nil {
+		a.view.SetStatus("No image selected", true)
+		return
+	}
+
+	a.view.SetStatus("Scanning image "+img.Repository+":"+img.Tag+"...", false)
+	a.store.SetScanInProgress(img.ID, true)
+	a.render()
+
+	// 1. Run Trivy scan
+	tResult, tErr := a.trivy.ScanImage(ctx, img.ID)
+	if tErr != nil {
+		a.store.SetScanningError(img.ID, "Trivy: "+tErr.Error())
+	} else {
+		a.store.SetSecurityResult(img.ID, "Trivy", tResult)
+	}
+
+	// 2. Run Snyk scan
+	sResult, sErr := a.snyk.ScanImage(ctx, img.ID)
+	if sErr == nil {
+		a.store.SetSecurityResult(img.ID, "Snyk", sResult)
+	}
+
+	// 3. Best Practices (correlate with Trivy by default or combined)
+	// For simplicity, we use the Trivy result for best practices analysis if available.
+	if tErr == nil {
+		details, derr := a.docker.InspectImage(ctx, img.ID)
+		if derr == nil {
+			recs := a.bestRecs.Analyze(details, tResult)
+			a.store.SetRecommendations(img.ID, recs)
+		}
+	}
+
+	a.view.SetStatus("Scan & analysis complete for "+img.Repository, false)
 	a.render()
 }

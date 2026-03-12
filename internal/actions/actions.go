@@ -1,3 +1,4 @@
+// KHLIFI HOUCEM / INGENIEUR DEVSECOPS && CLOUD
 // Package actions provides confirmed user operations on containers and projects.
 package actions
 
@@ -77,4 +78,19 @@ func (r *Runner) ComposePull(ctx context.Context, projectDir string) error {
 // ComposeBuild runs docker compose build.
 func (r *Runner) ComposeBuild(ctx context.Context, projectDir string) error {
 	return r.compose.Build(ctx, projectDir)
+}
+
+// ImageRemove removes a Docker image.
+func (r *Runner) ImageRemove(ctx context.Context, id string) error {
+	return r.docker.ImageRemove(ctx, id)
+}
+
+// VolumeRemove removes a Docker volume.
+func (r *Runner) VolumeRemove(ctx context.Context, name string) error {
+	return r.docker.VolumeRemove(ctx, name)
+}
+
+// NetworkRemove removes a Docker network.
+func (r *Runner) NetworkRemove(ctx context.Context, id string) error {
+	return r.docker.NetworkRemove(ctx, id)
 }

@@ -1,3 +1,4 @@
+// KHLIFI HOUCEM / INGENIEUR DEVSECOPS && CLOUD
 // Package compose wraps the docker compose CLI for project-level operations.
 package compose
 
@@ -16,11 +17,15 @@ import (
 // Runner executes docker compose commands.
 type Runner struct {
 	dockerContext string // optional: --context flag
+	dockerHost    string // optional: DOCKER_HOST environment
 }
 
-// New creates a Runner for the given Docker context.
-func New(dockerContext string) *Runner {
-	return &Runner{dockerContext: dockerContext}
+// New creates a Runner for the given Docker context and host.
+func New(dockerContext, dockerHost string) *Runner {
+	return &Runner{
+		dockerContext: dockerContext,
+		dockerHost:    dockerHost,
+	}
 }
 
 func (r *Runner) baseArgs() []string {
@@ -34,6 +39,9 @@ func (r *Runner) baseArgs() []string {
 func (r *Runner) run(ctx context.Context, projectDir string, extra ...string) ([]byte, []byte, error) {
 	args := append(r.baseArgs(), extra...)
 	cmd := exec.CommandContext(ctx, "docker", args...)
+	if r.dockerHost != "" {
+		cmd.Env = append(os.Environ(), "DOCKER_HOST="+r.dockerHost)
+	}
 	if projectDir != "" {
 		cmd.Dir = projectDir
 	}
@@ -112,6 +120,9 @@ type LSEntry struct {
 func (r *Runner) LS(ctx context.Context) ([]LSEntry, error) {
 	args := append(r.baseArgs(), "ls", "--format", "json", "--all")
 	cmd := exec.CommandContext(ctx, "docker", args...)
+	if r.dockerHost != "" {
+		cmd.Env = append(os.Environ(), "DOCKER_HOST="+r.dockerHost)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -244,6 +255,9 @@ func (r *Runner) Logs(ctx context.Context, projectDir string, service string) (<
 		args = append(args, service)
 	}
 	cmd := exec.CommandContext(ctx, "docker", args...)
+	if r.dockerHost != "" {
+		cmd.Env = append(os.Environ(), "DOCKER_HOST="+r.dockerHost)
+	}
 	if projectDir != "" {
 		cmd.Dir = projectDir
 	}

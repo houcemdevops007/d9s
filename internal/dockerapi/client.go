@@ -1,3 +1,4 @@
+// KHLIFI HOUCEM / INGENIEUR DEVSECOPS && CLOUD
 // Package dockerapi provides a client for the Docker Engine API via Unix socket.
 // It uses only the Go standard library (net/http + encoding/json).
 package dockerapi
@@ -10,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -23,29 +25,55 @@ const (
 
 // Client communicates with the Docker daemon.
 type Client struct {
-	http       *http.Client
-	socketPath string
+	http    *http.Client
+	baseURL string
 }
 
-// New creates a new Docker API client using the given Unix socket path.
-// If socketPath is empty, the default /var/run/docker.sock is used.
-func New(socketPath string) *Client {
-	if socketPath == "" {
-		socketPath = defaultSocket
+// New creates a new Docker API client using the given host string.
+// Supports "unix:///path", "tcp://ip:port", or bare Unix paths.
+// If host is empty, it falls back to DOCKER_HOST env var, then default socket.
+func New(host string) *Client {
+	if host == "" {
+		host = os.Getenv("DOCKER_HOST")
 	}
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", socketPath)
-		},
+	if host == "" {
+		host = "unix://" + defaultSocket
 	}
+
+	var transport *http.Transport
+	var baseURL string
+
+	if strings.HasPrefix(host, "unix://") {
+		socketPath := strings.TrimPrefix(host, "unix://")
+		transport = &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, "unix", socketPath)
+			},
+		}
+		baseURL = "http://localhost"
+	} else if strings.HasPrefix(host, "tcp://") {
+		baseURL = strings.Replace(host, "tcp://", "http://", 1)
+		transport = &http.Transport{}
+	} else if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+		baseURL = host
+		transport = &http.Transport{}
+	} else {
+		transport = &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, "unix", host)
+			},
+		}
+		baseURL = "http://localhost"
+	}
+
 	return &Client{
-		http:       &http.Client{Transport: transport},
-		socketPath: socketPath,
+		http:    &http.Client{Transport: transport},
+		baseURL: baseURL,
 	}
 }
 
 func (c *Client) url(path string) string {
-	return fmt.Sprintf("http://localhost/%s%s", apiVersion, path)
+	return fmt.Sprintf("%s/%s%s", c.baseURL, apiVersion, path)
 }
 
 func (c *Client) get(ctx context.Context, path string) (*http.Response, error) {
@@ -487,6 +515,26 @@ func (c *Client) ListVolumes(ctx context.Context) ([]domain.Volume, error) {
 	return vols, nil
 }
 
+// InspectVolume returns raw JSON for a volume.
+func (c *Client) InspectVolume(ctx context.Context, name string) (interface{}, error) {
+	resp, err := c.get(ctx, "/volumes/"+name)
+	if err != nil {
+		return nil, fmt.Errorf("inspect volume: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("inspect volume: %s", string(body))
+	}
+
+	var data interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 // ListNetworks returns all Docker networks.
 func (c *Client) ListNetworks(ctx context.Context) ([]domain.Network, error) {
 	resp, err := c.get(ctx, "/networks")
@@ -517,6 +565,176 @@ func (c *Client) ListNetworks(ctx context.Context) ([]domain.Network, error) {
 		})
 	}
 	return nets, nil
+}
+
+// InspectNetwork returns raw JSON for a network.
+func (c *Client) InspectNetwork(ctx context.Context, id string) (interface{}, error) {
+	resp, err := c.get(ctx, "/networks/"+id)
+	if err != nil {
+		return nil, fmt.Errorf("inspect network: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("inspect network: %s", string(body))
+	}
+
+	var data interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+// NetworkRemove removes a network.
+func (c *Client) NetworkRemove(ctx context.Context, id string) error {
+	resp, err := c.delete(ctx, "/networks/"+id)
+	if err != nil {
+		return fmt.Errorf("network remove: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("network remove: %s", string(body))
+	}
+	return nil
+}
+
+// ListImages returns all Docker images.
+func (c *Client) ListImages(ctx context.Context) ([]domain.Image, error) {
+	resp, err := c.get(ctx, "/images/json")
+	if err != nil {
+		return nil, fmt.Errorf("list images: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var raw []struct {
+		ID          string   `json:"Id"`
+		RepoTags    []string `json:"RepoTags"`
+		Size        int64    `json:"Size"`
+		Created     int64    `json:"Created"`
+		Containers  int      `json:"Containers"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("list images decode: %w", err)
+	}
+
+	images := make([]domain.Image, 0, len(raw))
+	for _, r := range raw {
+		repo := "<none>"
+		tag := "<none>"
+		if len(r.RepoTags) > 0 && r.RepoTags[0] != "<none>:<none>" {
+			parts := strings.SplitN(r.RepoTags[0], ":", 2)
+			repo = parts[0]
+			if len(parts) > 1 {
+				tag = parts[1]
+			}
+		}
+		
+		id := r.ID
+		if strings.HasPrefix(id, "sha256:") {
+			id = id[7:19]
+		}
+
+		images = append(images, domain.Image{
+			ID:         id,
+			Repository: repo,
+			Tag:        tag,
+			Size:       r.Size,
+			Created:    r.Created,
+			Containers: r.Containers,
+		})
+	}
+	return images, nil
+}
+
+// InspectImage returns detailed info for an image.
+func (c *Client) InspectImage(ctx context.Context, id string) (domain.ImageDetails, error) {
+	resp, err := c.get(ctx, "/images/"+id+"/json")
+	if err != nil {
+		return domain.ImageDetails{}, fmt.Errorf("inspect image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var raw struct {
+		ID          string   `json:"Id"`
+		RepoTags    []string `json:"RepoTags"`
+		RepoDigests []string `json:"RepoDigests"`
+		Created     string   `json:"Created"`
+		Size        int64    `json:"Size"`
+		Architecture string   `json:"Architecture"`
+		Os          string   `json:"Os"`
+		Author      string   `json:"Author"`
+		Config      struct {
+			User         string              `json:"User"`
+			ExposedPorts map[string]struct{} `json:"ExposedPorts"`
+			Env          []string            `json:"Env"`
+			Entrypoint   []string            `json:"Entrypoint"`
+			Cmd          []string            `json:"Cmd"`
+			Labels       map[string]string   `json:"Labels"`
+			WorkingDir   string              `json:"WorkingDir"`
+		} `json:"Config"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return domain.ImageDetails{}, fmt.Errorf("inspect image decode: %w", err)
+	}
+
+	created, _ := time.Parse(time.RFC3339Nano, raw.Created)
+	
+	ports := make([]string, 0, len(raw.Config.ExposedPorts))
+	for p := range raw.Config.ExposedPorts {
+		ports = append(ports, p)
+	}
+
+	return domain.ImageDetails{
+		ID:           raw.ID,
+		RepoTags:     raw.RepoTags,
+		RepoDigests:  raw.RepoDigests,
+		Created:      created,
+		Size:         raw.Size,
+		Architecture: raw.Architecture,
+		OS:           raw.Os,
+		Author:       raw.Author,
+		Config: domain.ImageConfig{
+			User:         raw.Config.User,
+			ExposedPorts: ports,
+			Env:          raw.Config.Env,
+			Entrypoint:   raw.Config.Entrypoint,
+			Cmd:          raw.Config.Cmd,
+			Labels:       raw.Config.Labels,
+			WorkingDir:   raw.Config.WorkingDir,
+		},
+	}, nil
+}
+
+// ImageRemove removes an image.
+func (c *Client) ImageRemove(ctx context.Context, id string) error {
+	resp, err := c.delete(ctx, "/images/"+id)
+	if err != nil {
+		return fmt.Errorf("image remove: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("image remove: %s", string(body))
+	}
+	return nil
+}
+
+// VolumeRemove removes a volume.
+func (c *Client) VolumeRemove(ctx context.Context, name string) error {
+	resp, err := c.delete(ctx, "/volumes/"+name)
+	if err != nil {
+		return fmt.Errorf("volume remove: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("volume remove: %s", string(body))
+	}
+	return nil
 }
 
 // ListContexts returns Docker contexts using CLI.

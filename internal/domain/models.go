@@ -1,3 +1,4 @@
+// KHLIFI HOUCEM / INGENIEUR DEVSECOPS && CLOUD
 // Package domain defines the core business entities for d9s.
 package domain
 
@@ -123,4 +124,109 @@ type LogLine struct {
 	Timestamp   time.Time
 	Stream      string // stdout or stderr
 	Text        string
+}
+
+// Image represents a Docker image.
+type Image struct {
+	ID          string // Image ID (full or short)
+	Repository  string // e.g. "nginx"
+	Tag         string // e.g. "latest"
+	Size        int64
+	Created     int64
+	Containers  int // Count of containers using this image
+}
+
+// ImageDetails holds extended metadata for an image.
+type ImageDetails struct {
+	ID          string
+	RepoTags    []string
+	RepoDigests []string
+	Created     time.Time
+	Size        int64
+	Architecture string
+	OS          string
+	Author      string
+	Config      ImageConfig
+}
+
+// ImageConfig contains runtime configuration for an image.
+type ImageConfig struct {
+	User         string
+	ExposedPorts []string
+	Env          []string
+	Entrypoint   []string
+	Cmd          []string
+	Labels       map[string]string
+	WorkingDir   string
+}
+
+// SecurityScanResult holds findings from scanners like Trivy or Snyk.
+type SecurityScanResult struct {
+	ImageID         string
+	Scanner         string // "Trivy", "Snyk"
+	ScanTime        time.Time
+	Summary         ScanSummary
+	Vulnerabilities []VulnerabilityFinding
+	Misconfigs      []MisconfigurationFinding
+	Secrets         []SecretFinding
+	Licenses        []LicenseFinding
+}
+
+// ScanSummary provides high-level counts.
+type ScanSummary struct {
+	Critical int
+	High     int
+	Medium   int
+	Low      int
+	Unknown  int
+}
+
+// VulnerabilityFinding represents a single CVE or vulnerability.
+type VulnerabilityFinding struct {
+	ID           string // CVE-ID
+	Title        string
+	Description  string
+	Severity     string
+	Package      string
+	Version      string
+	FixedVersion string
+	PrimaryURL   string
+}
+
+// MisconfigurationFinding represents a security misconfiguration.
+type MisconfigurationFinding struct {
+	ID         string
+	Type       string
+	Title      string
+	Severity   string
+	Message    string
+	Resolution string
+}
+
+// SecretFinding represents a detected secret or sensitive data.
+type SecretFinding struct {
+	RuleID   string
+	Category string
+	Severity string
+	Title    string
+	Match    string
+}
+
+// LicenseFinding represents a problematic license.
+type LicenseFinding struct {
+	Package string
+	Name    string
+	Severity string
+}
+
+// BestPracticeRecommendation is a computed suggestion for improvement.
+type BestPracticeRecommendation struct {
+	ID             string
+	Title          string
+	Severity       string // info, warning, critical
+	Category       string // base_image, packages, runtime, secrets, misconfig
+	Reason         string
+	Evidence       []string
+	Recommendation string
+	Example        string
 }

@@ -1,3 +1,4 @@
+// KHLIFI HOUCEM / INGENIEUR DEVSECOPS && CLOUD
 // Package tui implements the terminal user interface for d9s using raw ANSI codes.
 // It uses only Go standard library: os, syscall, fmt, strings, time, unicode.
 package tui
@@ -66,6 +67,8 @@ type Theme struct {
 	Success   string // green
 	Warning   string // yellow
 	Error     string // red
+	Danger    string // red (alias for ease of use)
+	Info      string // cyan (information)
 	Muted     string // dim white
 
 	// Backgrounds
@@ -94,6 +97,8 @@ func DefaultTheme() Theme {
 		Success:   fmt.Sprintf(fg256, 76),   // chartreuse green
 		Warning:   fmt.Sprintf(fg256, 220),  // gold
 		Error:     fmt.Sprintf(fg256, 196),  // bright red
+		Danger:    fmt.Sprintf(fg256, 196),  // same as Error
+		Info:      fmt.Sprintf(fg256, 45),   // bright turquoise
 		Muted:     colorBrightBlack,
 
 		BgHeader:   fmt.Sprintf(bg256, 17),   // dark navy
