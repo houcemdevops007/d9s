@@ -1,0 +1,7 @@
+# import config
+packagefile fmt=/Users/houcem/Documents/d9s/.cache/d9/d91ab5ae6add53e72a1a39941b97c4bdcc244eccefe14f5e6e87179600cb1d45-d
+packagefile github.com/houcemdevops007/d9s/internal/app=/Users/houcem/Documents/d9s/.cache/43/4386d7614bacd3cf715a45fe7b1f7972e0af62690d4b0f76a37bc72bf749f2fa-d
+packagefile github.com/houcemdevops007/d9s/internal/config=/Users/houcem/Documents/d9s/.cache/60/60d64e6513e7211966c2b5cdddeb277ff7dc1d11e3f4e40f1e1d410472fdfe92-d
+packagefile github.com/houcemdevops007/d9s/pkg/version=/Users/houcem/Documents/d9s/.cache/03/03cc82055599c4efcad82704712267a52bf979256570b74044f45c8808ef950c-d
+packagefile os=/Users/houcem/Documents/d9s/.cache/30/30c0d0d266780aa1d5aa3e0a30c5e978d12e240f37bf9f44436ee41f7088484c-d
+packagefile runtime=/Users/houcem/Documents/d9s/.cache/e1/e1186ec8d2bda180d68d29a496016928aea7393ab69c1aa0034c59091f2e64dc-d
