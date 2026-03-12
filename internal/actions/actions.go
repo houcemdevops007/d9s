@@ -14,13 +14,14 @@ import (
 
 // Runner exposes all user-facing actions.
 type Runner struct {
-	docker  *dockerapi.Client
-	compose *compose.Runner
+	docker     *dockerapi.Client
+	compose    *compose.Runner
+	dockerHost string
 }
 
 // New creates an action runner.
-func New(docker *dockerapi.Client, composeRunner *compose.Runner) *Runner {
-	return &Runner{docker: docker, compose: composeRunner}
+func New(docker *dockerapi.Client, composeRunner *compose.Runner, dockerHost string) *Runner {
+	return &Runner{docker: docker, compose: composeRunner, dockerHost: dockerHost}
 }
 
 // ContainerStart starts a container.
@@ -47,9 +48,15 @@ func (r *Runner) ContainerRemove(ctx context.Context, id string) error {
 // This replaces the current process with the shell session.
 func (r *Runner) ExecShell(containerID string, dockerContext string) error {
 	args := []string{"exec", "-it", containerID, "sh", "-c", "which bash && exec bash || exec sh"}
-	if dockerContext != "" {
+	
+	if r.dockerHost != "" {
+		// Use -H flag for remote docker TCP hosts
+		args = append([]string{"-H", r.dockerHost}, args...)
+	} else if dockerContext != "" {
+		// Use --context for local/docker-context setups
 		args = append([]string{"--context", dockerContext}, args...)
 	}
+	
 	cmd := exec.Command("docker", args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

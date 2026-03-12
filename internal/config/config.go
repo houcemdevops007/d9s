@@ -16,6 +16,7 @@ type Config struct {
 	LogTailLines    int           `json:"log_tail_lines"`
 	Theme           string        `json:"theme"` // "dark" or "light"
 	RefreshInterval time.Duration `json:"refresh_interval"`
+	Hosts           []string      `json:"hosts"` // Multi-remote hosts list
 }
 
 // Default returns a Config with sensible defaults.
@@ -26,6 +27,7 @@ func Default() *Config {
 		LogTailLines:    200,
 		Theme:           "dark",
 		RefreshInterval: 5 * time.Second,
+		Hosts:           []string{},
 	}
 }
 
@@ -45,6 +47,8 @@ func Load() (*Config, error) {
 
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
+		// Save default configuration and return it
+		_ = Save(cfg)
 		return cfg, nil
 	}
 	if err != nil {

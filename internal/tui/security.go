@@ -31,7 +31,7 @@ func (v *View) renderSecurityDetail(b *strings.Builder, scanner string, col, wid
 		return
 	}
 
-	if msg, ok := v.scanErrors[img.ID]; ok {
+	if msg, ok := v.scanErrors[img.ID][scanner]; ok {
 		b.WriteString(MoveTo(startRow, col))
 		b.WriteString(t.Danger + " Scan failed: " + Reset + ClearLine())
 		b.WriteString(MoveTo(startRow+1, col))

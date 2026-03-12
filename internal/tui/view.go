@@ -61,7 +61,7 @@ type View struct {
 	security       map[string]map[string]domain.SecurityScanResult
 	recommendations map[string][]domain.BestPracticeRecommendation
 	scanInProgress map[string]bool
-	scanErrors     map[string]string
+	scanErrors     map[string]map[string]string
 	inspect        string
 	detailScroll   int
 	searching      bool

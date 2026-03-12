@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>d9s - Docker TUI</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --text-color: #f8fafc;
+            --primary: #38bdf8;
+            --secondary: #818cf8;
+            --accent: #22c55e;
+            --card-bg: #1e293b;
+            --code-bg: #0b0f19;
+            --border: #334155;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--bg-color);
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            color: var(--primary);
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        h2 {
+            font-size: 1.8rem;
+            color: var(--secondary);
+            margin-top: 2rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.5rem;
+        }
+
+        h3 {
+            font-size: 1.3rem;
+            color: var(--text-color);
+            margin-top: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .author {
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+
+        p {
+            margin-bottom: 1.2rem;
+            font-size: 1.05rem;
+        }
+
+        ul {
+            margin-bottom: 1.5rem;
+            padding-left: 1.5rem;
+        }
+
+        li {
+            margin-bottom: 0.5rem;
+        }
+
+        strong {
+            color: var(--primary);
+        }
+
+        code {
+            font-family: 'Fira Code', 'Courier New', Courier, monospace;
+            background-color: var(--code-bg);
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            color: #fca5a5;
+            font-size: 0.9em;
+        }
+
+        pre {
+            background-color: var(--code-bg);
+            padding: 1.5rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            border: 1px solid var(--border);
+            margin: 1.5rem 0;
+        }
+
+        pre code {
+            background-color: transparent;
+            padding: 0;
+            color: #e2e8f0;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            padding: 1.5rem;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        blockquote {
+            border-left: 4px solid var(--accent);
+            margin: 1.5rem 0;
+            padding: 1rem;
+            background-color: rgba(34, 197, 94, 0.1);
+            border-radius: 0 8px 8px 0;
+        }
+
+        .kbd {
+            display: inline-block;
+            padding: 0.1rem 0.4rem;
+            font-size: 0.85em;
+            font-weight: 700;
+            line-height: 1;
+            color: var(--bg-color);
+            background-color: #cbd5e1;
+            border: 1px solid #94a3b8;
+            border-radius: 4px;
+            box-shadow: inset 0 -1px 0 #94a3b8;
+            font-family: inherit;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>d9s - Docker TUI (Terminal User Interface)</h1>
+        <p class="author">Auteur : KHLIFI HOUCEM / INGENIEUR DEVSECOPS && CLOUD</p>
+    </header>
+
+    <main>
+        <p><strong>d9s</strong> est une interface utilisateur en terminal (TUI) puissante, rapide et intuitive pour gérer de bout en bout l'écosystème Docker. Conçu spécifiquement pour les ingénieurs DevOps, SecOps et les développeurs, <code>d9s</code> combine la gestion de conteneurs, le pilotage de Docker Compose, et l'intégration de scanners de sécurité avancés (Trivy et Snyk) au sein d'une seule interface navigable entièrement au clavier.</p>
+
+        <h2>🚀 Fonctionnalités Principales</h2>
+
+        <div class="card">
+            <h3>1. Gestion Multi-Hôtes Distants (TCP/Unix)</h3>
+            <p><code>d9s</code> ne se limite pas au démon Docker local (socket <code>unix:///var/run/docker.sock</code>). Il permet de gérer dynamiquement plusieurs hôtes Docker distincts via un système de <strong>contextes</strong>.</p>
+            <ul>
+                <li><strong>Configuration dynamique</strong> : En renseignant le fichier <code>~/.config/d9s/config.json</code>, vous pouvez enregistrer des hôtes distants (ex: <code>tcp://172.16.50.13:2375</code>).</li>
+                <li><strong>Basculement instantané</strong> : Grâce au panneau latéral "CONTEXTS", l'utilisateur navigue et bascule d'un hôte Docker vers un autre (local, distant, serveurs de production, etc.) d'un simple appui sur la touche <span class="kbd">Entrée</span> sans jamais redémarrer l'application.</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h3>2. Contrôle et Visualisation de l'Écosystème Docker</h3>
+            <p><code>d9s</code> permet de tout voir et tout faire de manière centralisée, avec des raccourcis intuitifs :</p>
+            <ul>
+                <li><strong>Conteneurs (touche <span class="kbd">c</span>)</strong> : Lister les conteneurs. Raccourcis pour stopper (<span class="kbd">x</span>), redémarrer (<span class="kbd">r</span>), ou supprimer (<span class="kbd">R</span> ou <span class="kbd">Suppr</span>).</li>
+                <li><strong>Shell Interactif (touche <span class="kbd">S</span>)</strong> : Ouvrir un shell interactif directement à l'intérieur d'un conteneur en cours d'exécution.</li>
+                <li><strong>Images (touche <span class="kbd">g</span> ou <span class="kbd">i</span>)</strong> : Voir et gérer les images locales.</li>
+                <li><strong>Volumes (touche <span class="kbd">v</span>)</strong> & <strong>Réseaux (touche <span class="kbd">n</span>)</strong> : Vues d'ensemble complètes.</li>
+                <li><strong>Inspect (touche <span class="kbd">i</span>)</strong> : Obtenir un dump JSON clair et formaté de l'objet ciblé.</li>
+                <li><strong>Logs (touche <span class="kbd">l</span>)</strong> : Consulter les journaux en direct des conteneurs.</li>
+                <li><strong>Events & Stats</strong> : Surveiller en temps réel CPU/RAM.</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h3>3. Gestion Native de Docker Compose (Projets)</h3>
+            <p>Le panneau "PROJECTS" gère intelligemment la couche Docker Compose :</p>
+            <ul>
+                <li>Détecte automatiquement les environnements (dossiers Compose).</li>
+                <li>Pilote <code>docker-compose</code> avec des raccourcis :
+                    <ul>
+                        <li><span class="kbd">u</span> = Compose Up</li>
+                        <li><span class="kbd">d</span> = Compose Down</li>
+                        <li><span class="kbd">p</span> = Compose Pull</li>
+                        <li><span class="kbd">b</span> = Compose Build</li>
+                    </ul>
+                </li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h3>4. SecOps & Conformité (Trivy + Snyk)</h3>
+            <p>La plus grande force de <code>d9s</code> réside dans ses onglets de sécurité intégrés nativement. Sélectionnez une Image Docker et :</p>
+            <ul>
+                <li><strong>Trivy Scan</strong> : Rapport de vulnérabilités open-source rapide listant les CVE (Critique, Haut, Moyen, Bas).</li>
+                <li><strong>Snyk Scan</strong> : Analyse profonde via l'outil professionnel Snyk (si installé localement).</li>
+                <li><strong>Best Practices</strong> : Vérifications heuristiques (root user, images LTS, taille, ports exposés) couplant données d'inspection et sécurité.</li>
+            </ul>
+        </div>
+
+        <h2>💻 Raccourcis Clavier</h2>
+        <p>Toute la TUI est gérée avec le clavier sans aucune dépendance à la souris pour optimiser la productivité globale. 
+        Touches utiles : <span class="kbd">Tab</span> pour basculer de panneaux/onglets, les <span class="kbd">Flèches</span> pour naviguer, et le <span class="kbd">/</span> pour la recherche filtrée instantanée.</p>
+
+        <h2>🛠️ Compilation Multi-Plateforme (Linux & MacOS)</h2>
+        <p>Le projet intègre un Makefile pour compiler vers de multiples architectures. (Pré-requis : Go 1.22+)</p>
+
+        <pre><code class="language-bash"># Compiler pour votre système local
+make build
+
+# Compiler spécialement pour Linux (AMD64 et ARM64)
+make build-linux
+
+# Compiler spécialement pour MacOS (AMD64 et ARM64)
+make build-darwin
+
+# Tout compiler d'un seul coup
+make build-all</code></pre>
+
+        <p><strong>Installation :</strong></p>
+        <pre><code class="language-bash">sudo make install
+# d9s se copiera dans /usr/local/bin/d9s</code></pre>
+
+        <blockquote>
+            <strong>Note :</strong> Les CLI externes comme <code>trivy</code> et <code>snyk</code> doivent être installées et dans votre <code>$PATH</code> pour que les scanners de sécurité fonctionnent dans l'application locale.
+        </blockquote>
+
+    </main>
+
+</body>
+</html>

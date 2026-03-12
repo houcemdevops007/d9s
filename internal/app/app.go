@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/houcemdevops007/d9s/internal/actions"
@@ -38,7 +39,7 @@ type App struct {
 func New(cfg *config.Config, dockerHost string) *App {
 	docker := dockerapi.New(dockerHost)
 	comp := compose.New(cfg.DefaultContext, dockerHost)
-	act := actions.New(docker, comp)
+	act := actions.New(docker, comp, dockerHost)
 	st := store.New()
 
 	return &App{
@@ -185,7 +186,9 @@ func (a *App) handleKey(ctx context.Context, k tui.Key) bool {
 	case k.IsKey && k.Code == tui.KeyEnter:
 		pan := a.view.ActivePanel()
 		tab := a.view.ActiveTab()
-		if pan == tui.PanelContainers {
+		if pan == tui.PanelContexts {
+			go a.switchContext(ctx)
+		} else if pan == tui.PanelContainers {
 			a.view.SetActiveTab(tui.TabLogs)
 			go a.loadLogs(ctx)
 		} else if pan == tui.PanelVolumes || pan == tui.PanelNetworks {
@@ -206,7 +209,7 @@ func (a *App) handleKey(ctx context.Context, k tui.Key) bool {
 	case k.Rune == 'R' || (k.IsKey && k.Code == tui.KeyDelete):
 		go a.containerAction(ctx, "remove")
 	case k.Rune == 'S':
-		go a.execShell()
+		a.execShell() // synchronous block
 	case k.Rune == 'u':
 		go a.composeAction(ctx, "up")
 	case k.Rune == 'd':
@@ -224,7 +227,10 @@ func (a *App) handleKey(ctx context.Context, k tui.Key) bool {
 	case k.Rune == 'n':
 		a.view.SetActivePanel(tui.PanelNetworks)
 	case k.Rune == 's' && a.view.ActivePanel() == tui.PanelImages:
-		a.view.SetActiveTab(tui.TabTrivy)
+		tab := a.view.ActiveTab()
+		if tab != tui.TabTrivy && tab != tui.TabSnyk && tab != tui.TabRecommendations {
+			a.view.SetActiveTab(tui.TabTrivy)
+		}
 		go a.scanImage(ctx)
 	}
 	return false
@@ -246,6 +252,28 @@ func (a *App) loadInitialData(ctx context.Context) {
 			ctxs[i].Current = false
 		}
 		ctxs = append([]domain.DockerContext{remoteCtx}, ctxs...)
+	}
+
+	// Add configured hosts
+	for _, h := range a.cfg.Hosts {
+		if h == a.dockerHost {
+			continue // Already added
+		}
+		exists := false
+		for _, c := range ctxs {
+			if c.Endpoint == h || c.Name == h {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			ctxs = append(ctxs, domain.DockerContext{
+				Name:        h,
+				Description: "Configured Remote Host",
+				Endpoint:    h,
+				Current:     false,
+			})
+		}
 	}
 
 	if err == nil || len(ctxs) > 0 {
@@ -520,9 +548,13 @@ func (a *App) execShell() {
 	a.term.Restore()
 	fmt.Print("\x1b[?1049l" + tui.ShowCursor())
 
-	err := a.actions.ExecShell(c.ID, a.cfg.DefaultContext)
+	activeCtx := ""
+	if cCtx := a.view.ActiveContext(); cCtx != nil {
+		activeCtx = cCtx.Name
+	}
+	err := a.actions.ExecShell(c.ID, activeCtx)
 
-	fmt.Print("\x1b[?1049h")
+	fmt.Print("\x1b[?1049h" + tui.HideCursor())
 	a.term.SetRaw() //nolint
 
 	if err != nil {
@@ -545,14 +577,16 @@ func (a *App) scanImage(ctx context.Context) {
 	// 1. Run Trivy scan
 	tResult, tErr := a.trivy.ScanImage(ctx, img.ID)
 	if tErr != nil {
-		a.store.SetScanningError(img.ID, "Trivy: "+tErr.Error())
+		a.store.SetScanningError(img.ID, "Trivy", "Trivy: "+tErr.Error())
 	} else {
 		a.store.SetSecurityResult(img.ID, "Trivy", tResult)
 	}
 
 	// 2. Run Snyk scan
 	sResult, sErr := a.snyk.ScanImage(ctx, img.ID)
-	if sErr == nil {
+	if sErr != nil {
+		a.store.SetScanningError(img.ID, "Snyk", "Snyk: "+sErr.Error())
+	} else {
 		a.store.SetSecurityResult(img.ID, "Snyk", sResult)
 	}
 
@@ -567,5 +601,50 @@ func (a *App) scanImage(ctx context.Context) {
 	}
 
 	a.view.SetStatus("Scan & analysis complete for "+img.Repository, false)
+	a.render()
+}
+
+func (a *App) switchContext(ctx context.Context) {
+	c := a.view.ActiveContext()
+	if c == nil {
+		return
+	}
+
+	a.view.SetStatus(fmt.Sprintf("Switching context to %s...", c.Name), false)
+	a.render()
+
+	if strings.HasPrefix(c.Name, "tcp://") || strings.HasPrefix(c.Name, "unix://") || strings.HasPrefix(c.Name, "http://") || strings.HasPrefix(c.Name, "https://") {
+		// Custom remote host
+		a.dockerHost = c.Name
+		a.docker = dockerapi.New(a.dockerHost)
+		a.compose = compose.New(a.cfg.DefaultContext, a.dockerHost)
+		a.actions = actions.New(a.docker, a.compose, a.dockerHost)
+		a.trivy = scanners.NewTrivyScanner(a.dockerHost)
+		a.snyk = scanners.NewSnykScanner(a.dockerHost)
+	} else {
+		// Native docker context
+		if err := compose.SwitchContext(c.Name); err != nil {
+			a.view.SetStatus(fmt.Sprintf("Failed to switch context: %s", err), true)
+			a.render()
+			return
+		}
+		a.dockerHost = ""
+		a.docker = dockerapi.New("")
+		a.compose = compose.New(c.Name, "")
+		a.actions = actions.New(a.docker, a.compose, "")
+		a.trivy = scanners.NewTrivyScanner("")
+		a.snyk = scanners.NewSnykScanner("")
+	}
+
+	// Clear local state
+	a.store.SetContainers(nil)
+	a.store.SetImages(nil)
+	a.store.SetVolumes(nil)
+	a.store.SetNetworks(nil)
+	a.store.SetProjects(nil)
+	
+	// Reload
+	a.loadInitialData(ctx)
+	a.view.SetStatus(fmt.Sprintf("Switched to %s", c.Name), false)
 	a.render()
 }

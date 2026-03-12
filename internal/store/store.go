@@ -23,7 +23,7 @@ type State struct {
 	Stats            map[string]domain.RuntimeStats // keyed by container ID
 	SecurityResults  map[string]map[string]domain.SecurityScanResult // keyed by [imageID][scanner]
 	ScanInProgress   map[string]bool                // keyed by image ID
-	ScanningErrors   map[string]string              // keyed by image ID
+	ScanningErrors   map[string]map[string]string   // keyed by [imageID][scanner]
 	Recommendations  map[string][]domain.BestPracticeRecommendation // keyed by image ID
 	LastRefreshed    time.Time
 	ActiveContext    string
@@ -45,7 +45,7 @@ func New() *Store {
 			Stats:           make(map[string]domain.RuntimeStats),
 			SecurityResults: make(map[string]map[string]domain.SecurityScanResult),
 			ScanInProgress:  make(map[string]bool),
-			ScanningErrors:  make(map[string]string),
+			ScanningErrors:  make(map[string]map[string]string),
 			Recommendations: make(map[string][]domain.BestPracticeRecommendation),
 		},
 	}
@@ -90,9 +90,12 @@ func (s *Store) Snapshot() State {
 	for k, v := range s.state.ScanInProgress {
 		cp.ScanInProgress[k] = v
 	}
-	cp.ScanningErrors = make(map[string]string, len(s.state.ScanningErrors))
+	cp.ScanningErrors = make(map[string]map[string]string, len(s.state.ScanningErrors))
 	for k, v := range s.state.ScanningErrors {
-		cp.ScanningErrors[k] = v
+		cp.ScanningErrors[k] = make(map[string]string, len(v))
+		for scanner, err := range v {
+			cp.ScanningErrors[k][scanner] = err
+		}
 	}
 	cp.Recommendations = make(map[string][]domain.BestPracticeRecommendation, len(s.state.Recommendations))
 	for k, v := range s.state.Recommendations {
@@ -197,6 +200,8 @@ func (s *Store) SetImages(images []domain.Image) {
 }
 
 // SetScanInProgress updates the scan status for an image.
+// SetScanInProgress updates the scan status for an image.
+// Resetting clears both Trivy and Snyk errors to start fresh.
 func (s *Store) SetScanInProgress(imageID string, inProgress bool) {
 	s.mu.Lock()
 	if s.state.ScanInProgress == nil {
@@ -225,13 +230,16 @@ func (s *Store) SetSecurityResult(imageID, scanner string, res domain.SecuritySc
 	s.notify()
 }
 
-// SetScanningError records an error during scan.
-func (s *Store) SetScanningError(imageID string, err string) {
+// SetScanningError records an error during scan for a specific scanner.
+func (s *Store) SetScanningError(imageID string, scanner string, err string) {
 	s.mu.Lock()
 	if s.state.ScanningErrors == nil {
-		s.state.ScanningErrors = make(map[string]string)
+		s.state.ScanningErrors = make(map[string]map[string]string)
 	}
-	s.state.ScanningErrors[imageID] = err
+	if s.state.ScanningErrors[imageID] == nil {
+		s.state.ScanningErrors[imageID] = make(map[string]string)
+	}
+	s.state.ScanningErrors[imageID][scanner] = err
 	s.state.ScanInProgress[imageID] = false
 	s.mu.Unlock()
 	s.notify()
