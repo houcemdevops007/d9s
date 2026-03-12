@@ -117,6 +117,50 @@ make lint        # go vet
 make clean       # clean artifacts
 ```
 
+## Installation & Usage on Linux
+
+To use `d9s` on a Linux server:
+
+1. **Build the Linux binary** on your development machine (Mac):
+   ```bash
+   make build-linux-amd64
+   ```
+2. **Transfer the binary** to your Linux server:
+   ```bash
+   scp build/d9s-linux-amd64 user@your-server:/usr/local/bin/d9s
+   ```
+3. **Run it**:
+   ```bash
+   ssh user@your-server
+   d9s
+   ```
+
+## Sharing with Colleagues
+
+You can share `d9s` in two ways:
+
+### 1. Via Binaries (Recommended for quick use)
+Run `make package` to generate compressed archives for all platforms in the `build/` directory. You can then send these archives (`.tar.gz`) to your colleagues.
+
+### 2. Via Git (Recommended for development)
+1. Initialize a Git repository (if not already done):
+   ```bash
+   git init
+   git add .
+   git commit -m "Initial commit of d9s"
+   ```
+2. Push to a central repository (GitHub/GitLab):
+   ```bash
+   git remote add origin <your-repo-url>
+   git push -u origin main
+   ```
+3. Your colleagues can then clone and build it:
+   ```bash
+   git clone <your-repo-url>
+   cd d9s
+   make build
+   ```
+
 ## License
 
 MIT — see [LICENSE](LICENSE)
