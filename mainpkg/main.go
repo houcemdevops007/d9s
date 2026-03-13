@@ -8,17 +8,24 @@ import (
 	"github.com/houcemdevops007/d9s/internal/app"
 	"github.com/houcemdevops007/d9s/internal/config"
 	"github.com/houcemdevops007/d9s/pkg/version"
+	"strings"
 )
 
 func main() {
+	var host string
 	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "--version", "-v":
-			fmt.Printf("d9s version %s (%s) built %s\n", version.Version, version.GitCommit, version.BuildDate)
-			os.Exit(0)
-		case "--help", "-h":
-			printHelp()
-			os.Exit(0)
+		arg := os.Args[1]
+		if !strings.HasPrefix(arg, "-") {
+			host = arg
+		} else {
+			switch arg {
+			case "--version", "-v":
+				fmt.Printf("d9s version %s (%s) built %s\n", version.Version, version.GitCommit, version.BuildDate)
+				os.Exit(0)
+			case "--help", "-h":
+				printHelp()
+				os.Exit(0)
+			}
 		}
 	}
 
@@ -28,7 +35,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	application := app.New(cfg)
+	application := app.New(cfg, host)
 	if err := application.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "d9s: %v\n", err)
 		os.Exit(1)
